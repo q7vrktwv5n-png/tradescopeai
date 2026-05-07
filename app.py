@@ -12,7 +12,7 @@ st.set_page_config(layout="wide")
 # ===============================
 # 🔁 AUTO REFRESH (LIVE UPDATE)
 # ===============================
-st_autorefresh(interval=10000, key="refresh")  # ✅ changed to 10s
+st_autorefresh(interval=5000, key="refresh")
 
 # ===============================
 # 🎨 DARK MODE STYLE
@@ -77,7 +77,7 @@ elif page == "Dashboard":
     )
 
     # ===============================
-    # 🔴 LIVE PRICE (FIXED)
+    # 🔴 LIVE BINANCE PRICE (FIXED)
     # ===============================
     symbol_map = {
         "BTC-USD": "BTCUSDT",
@@ -88,24 +88,29 @@ elif page == "Dashboard":
 
     live_price = None
 
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json"
-    })
-
     try:
-        # 🔹 Binance
         url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol_map[selected_asset]}"
-        response = session.get(url, timeout=5)
+
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json"  # ✅ added
+        }
+
+        response = requests.get(url, headers=headers, timeout=5)
 
         if response.status_code == 200:
             data_api = response.json()
             if "price" in data_api:
                 live_price = float(data_api["price"])
+                st.metric("💰 Live Price (Binance)", f"${live_price:,.2f}")
+            else:
+                raise Exception("No price")
+        else:
+            raise Exception("Binance failed")
 
-        # 🔹 Fallback CoinGecko
-        if live_price is None:
+    except:
+        # ✅ fallback (only addition)
+        try:
             cg_map = {
                 "BTC-USD": "bitcoin",
                 "ETH-USD": "ethereum",
@@ -113,20 +118,21 @@ elif page == "Dashboard":
                 "ADA-USD": "cardano"
             }
 
-            cg_url = f"https://api.coingecko.com/api/v3/simple/price?ids={cg_map[selected_asset]}&vs_currencies=usd"
-            cg_response = session.get(cg_url, timeout=5)
+            cg_url = "https://api.coingecko.com/api/v3/simple/price"
 
-            if cg_response.status_code == 200:
-                cg_data = cg_response.json()
-                live_price = cg_data[cg_map[selected_asset]]["usd"]
+            cg_response = requests.get(
+                cg_url,
+                params={"ids": cg_map[selected_asset], "vs_currencies": "usd"},
+                timeout=5
+            )
 
-        if live_price:
+            cg_data = cg_response.json()
+            live_price = cg_data[cg_map[selected_asset]]["usd"]
+
             st.metric("💰 Live Price", f"${live_price:,.2f}")
-        else:
-            st.warning("Live price unavailable")
 
-    except:
-        st.warning("Live price unavailable")
+        except:
+            st.warning("Live price unavailable")
 
     # fallback so app still works
     if live_price is None:
@@ -158,4 +164,141 @@ elif page == "Dashboard":
             "timestamp": str(datetime.datetime.now())
         })
 
-    # (rest of your code unchanged...)
+    # ===============================
+    # 💰 SIMULATE PERFORMANCE
+    # ===============================
+    balance = 1000
+    position = 0
+    last_buy_price = 0
+    wins = 0
+    losses = 0
+
+    buy_x, buy_y = [], []
+    sell_x, sell_y = [], []
+
+    for i in range(len(data)):
+
+        price = data[i]["close"]
+        decision = decisions[i]["decision"]
+
+        if position == 0 and decision == "BUY":
+            position = balance / price
+            last_buy_price = price
+            buy_x.append(i)
+            buy_y.append(price)
+
+        elif position > 0 and decision == "SELL":
+
+            if price > last_buy_price:
+                wins += 1
+            else:
+                losses += 1
+
+            balance = position * price
+            position = 0
+            sell_x.append(i)
+            sell_y.append(price)
+
+    final_value = balance if position == 0 else balance + (position * data[-1]["close"])
+    profit = final_value - 1000
+
+    # ===============================
+    # 📊 CHART
+    # ===============================
+    df = pd.DataFrame(data)
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df["MA_5"] = df["close"].rolling(5).mean()
+    df = df.dropna().reset_index(drop=True)
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Candlestick(
+        x=df["timestamp"],
+        open=df["open"],
+        high=df["high"],
+        low=df["low"],
+        close=df["close"],
+        name="Candles"
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=df["timestamp"],
+        y=df["MA_5"],
+        mode="lines",
+        name="MA 5"
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=[df["timestamp"].iloc[i] for i in buy_x if i < len(df)],
+        y=buy_y,
+        mode="markers",
+        marker=dict(size=12, symbol="triangle-up"),
+        name="BUY"
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=[df["timestamp"].iloc[i] for i in sell_x if i < len(df)],
+        y=sell_y,
+        mode="markers",
+        marker=dict(size=12, symbol="triangle-down"),
+        name="SELL"
+    ))
+
+    st.subheader(f"📊 {selected_asset} Chart")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ===============================
+    # 📈 TREND
+    # ===============================
+    last_price = df["close"].iloc[-1]
+    prev_price = df["close"].iloc[-2]
+
+    if last_price > prev_price:
+        st.success("🟢 Market Trending Up")
+    else:
+        st.error("🔴 Market Trending Down")
+
+    # ===============================
+    # 🤖 AI DECISION
+    # ===============================
+    st.subheader("🤖 Latest AI Decision")
+
+    latest = decisions[-1]
+    decision = latest["decision"]
+    confidence = latest["confidence"]
+
+    if decision == "BUY":
+        st.success(f"BUY 🚀 (Confidence: {confidence:.2f})")
+    elif decision == "SELL":
+        st.error(f"SELL ⚠️ (Confidence: {confidence:.2f})")
+    else:
+        st.info("HOLD 🤝")
+
+    st.subheader("🧠 AI Explanation")
+
+    if decision == "BUY":
+        st.write("The AI detected upward momentum and strong probability of price increase.")
+    elif decision == "SELL":
+        st.write("The AI detected potential reversal or downward pressure.")
+    else:
+        st.write("The AI is uncertain and waiting for clearer signals.")
+
+    # ===============================
+    # 💰 PERFORMANCE
+    # ===============================
+    st.subheader("💰 Performance")
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Balance", f"${final_value:.2f}")
+    col2.metric("Profit", f"${profit:.2f}")
+
+    win_rate = (wins / (wins + losses)) * 100 if (wins + losses) > 0 else 0
+    col3.metric("Win Rate", f"{win_rate:.2f}%")
+
+    st.caption(f"Last updated: {datetime.datetime.now().strftime('%H:%M:%S')}")
+
+    # ===============================
+    # 📜 HISTORY
+    # ===============================
+    st.subheader("📜 Decision History")
+    st.write(decisions)
