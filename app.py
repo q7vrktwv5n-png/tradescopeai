@@ -39,7 +39,10 @@ if page == "Home":
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.image("tradescope_ai_logo.svg", use_container_width=True)
+        try:
+            st.image("tradescope_ai_logo.svg", use_container_width=True)
+        except:
+            st.write("TradeScope AI")
 
     st.markdown("<h3 style='text-align: center;'>AI-Powered Crypto Trading Intelligence</h3>", unsafe_allow_html=True)
 
@@ -74,7 +77,7 @@ elif page == "Dashboard":
     )
 
     # ===============================
-    # 🔴 LIVE BINANCE PRICE
+    # 🔴 LIVE BINANCE PRICE (FIXED)
     # ===============================
     symbol_map = {
         "BTC-USD": "BTCUSDT",
@@ -83,17 +86,36 @@ elif page == "Dashboard":
         "ADA-USD": "ADAUSDT"
     }
 
+    live_price = None
+
     try:
         url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol_map[selected_asset]}"
-        response = requests.get(url)
-        live_price = float(response.json()["price"])
-        st.metric("💰 Live Price (Binance)", f"${live_price:,.2f}")
+
+        headers = {
+            "User-Agent": "Mozilla/5.0"
+        }
+
+        response = requests.get(url, headers=headers, timeout=5)
+
+        if response.status_code == 200:
+            data_api = response.json()
+            if "price" in data_api:
+                live_price = float(data_api["price"])
+                st.metric("💰 Live Price (Binance)", f"${live_price:,.2f}")
+            else:
+                st.warning("Live price unavailable")
+        else:
+            st.warning("Live price unavailable")
+
     except:
         st.warning("Live price unavailable")
-        live_price = 2000  # fallback
+
+    # fallback so app still works
+    if live_price is None:
+        live_price = 2000
 
     # ===============================
-    # 📂 GENERATE LIVE DATA (FIX)
+    # 📂 GENERATE LIVE DATA
     # ===============================
     data = []
     decisions = []
