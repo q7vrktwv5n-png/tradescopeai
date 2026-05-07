@@ -15,6 +15,13 @@ st.set_page_config(layout="wide")
 st_autorefresh(interval=5000, key="refresh")
 
 # ===============================
+# 🧠 CACHE (ONLY ADDITION)
+# ===============================
+@st.cache_data(ttl=10)
+def cached_request(url, headers=None, params=None):
+    return requests.get(url, headers=headers, params=params, timeout=5)
+
+# ===============================
 # 🎨 DARK MODE STYLE
 # ===============================
 st.markdown("""
@@ -93,10 +100,11 @@ elif page == "Dashboard":
 
         headers = {
             "User-Agent": "Mozilla/5.0",
-            "Accept": "application/json"  # ✅ added
+            "Accept": "application/json"
         }
 
-        response = requests.get(url, headers=headers, timeout=5)
+        # ✅ ONLY LINE CHANGED HERE
+        response = cached_request(url, headers=headers)
 
         if response.status_code == 200:
             data_api = response.json()
@@ -109,7 +117,6 @@ elif page == "Dashboard":
             raise Exception("Binance failed")
 
     except:
-        # ✅ fallback (only addition)
         try:
             cg_map = {
                 "BTC-USD": "bitcoin",
@@ -120,10 +127,10 @@ elif page == "Dashboard":
 
             cg_url = "https://api.coingecko.com/api/v3/simple/price"
 
-            cg_response = requests.get(
+            # ✅ ONLY LINE CHANGED HERE
+            cg_response = cached_request(
                 cg_url,
-                params={"ids": cg_map[selected_asset], "vs_currencies": "usd"},
-                timeout=5
+                params={"ids": cg_map[selected_asset], "vs_currencies": "usd"}
             )
 
             cg_data = cg_response.json()
